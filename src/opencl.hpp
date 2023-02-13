@@ -3,11 +3,7 @@
 #define WORKGROUP_SIZE 64 // needs to be 64 to fully use AMD GPUs
 //#define PTX
 //#define LOG
-//#define USE_OPENCL_1_1
 
-#ifdef USE_OPENCL_1_1
-#define CL_USE_DEPRECATED_OPENCL_1_1_APIS
-#endif // USE_OPENCL_1_1
 #ifndef _WIN32
 #pragma GCC diagnostic ignored "-Wignored-attributes" // ignore compiler warnings for CL/cl.hpp with g++
 #endif // _WIN32
@@ -41,9 +37,9 @@ struct Device_Info {
 		max_constant_buffer = (uint)(cl_device.getInfo<CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE>()/1024ull); // maximum constant buffer size in KB
 		compute_units = (uint)cl_device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>(); // compute units (CUs) can contain multiple cores depending on the microarchitecture
 		clock_frequency = (uint)cl_device.getInfo<CL_DEVICE_MAX_CLOCK_FREQUENCY>(); // in MHz
-		is_fp64_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE>();
+		is_fp64_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE>()*(uint)contains(cl_device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp64");
 		is_fp32_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT>();
-		is_fp16_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF>();
+		is_fp16_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF>()*(uint)contains(cl_device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp16");
 		is_int64_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_LONG>();
 		is_int32_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_INT>();
 		is_int16_capable = (uint)cl_device.getInfo<CL_DEVICE_NATIVE_VECTOR_WIDTH_SHORT>();
@@ -51,10 +47,10 @@ struct Device_Info {
 		is_cpu = cl_device.getInfo<CL_DEVICE_TYPE>()==CL_DEVICE_TYPE_CPU;
 		is_gpu = cl_device.getInfo<CL_DEVICE_TYPE>()==CL_DEVICE_TYPE_GPU;
 		const uint ipc = is_gpu?2u:32u; // IPC (instructions per cycle) is 2 for GPUs and 32 for most modern CPUs
-		const bool nvidia_192_cores_per_cu = contains_any(to_lower(name), {" 6", " 7", "ro k", "la k"}) || (clock_frequency<1000u&&contains(to_lower(name), "titan")); // identify Kepler GPUs
-		const bool nvidia_64_cores_per_cu = contains_any(to_lower(name), {"p100", "v100", "a100", "a30", " 16", " 20", "titan v", "titan rtx", "ro t", "la t", "ro rtx"}) && !contains(to_lower(name), "rtx a"); // identify P100, Volta, Turing, A100, A30
+		const bool nvidia_192_cores_per_cu = contains_any(to_lower(name), {"gt 6", "gt 7", "gtx 6", "gtx 7", "quadro k", "tesla k"}) || (clock_frequency<1000u&&contains(to_lower(name), "titan")); // identify Kepler GPUs
+		const bool nvidia_64_cores_per_cu = contains_any(to_lower(name), {"p100", "v100", "a100", "a30", " 16", " 20", "titan v", "titan rtx", "quadro t", "tesla t", "quadro rtx"}) && !contains(to_lower(name), "rtx a"); // identify P100, Volta, Turing, A100, A30
 		const bool amd_128_cores_per_dualcu = contains(to_lower(name), "gfx10"); // identify RDNA/RDNA2 GPUs where dual CUs are reported
-		const float nvidia = (float)(contains(to_lower(vendor), "nvidia"))*(nvidia_192_cores_per_cu?192.0f:(nvidia_64_cores_per_cu?64.0f:128.0f)); // Nvidia GPUs have 192 cores/CU (Kepler), 128 cores/CU (Maxwell, Pascal, Ampere) or 64 cores/CU (P100, Volta, Turing, A100)
+		const float nvidia = (float)(contains(to_lower(vendor), "nvidia"))*(nvidia_64_cores_per_cu?64.0f:nvidia_192_cores_per_cu?192.0f:128.0f); // Nvidia GPUs have 192 cores/CU (Kepler), 128 cores/CU (Maxwell, Pascal, Ampere, Hopper, Ada) or 64 cores/CU (P100, Volta, Turing, A100, A30)
 		const float amd = (float)(contains_any(to_lower(vendor), {"amd", "advanced"}))*(is_gpu?(amd_128_cores_per_dualcu?128.0f:64.0f):0.5f); // AMD GPUs have 64 cores/CU (GCN, CDNA) or 128 cores/dualCU (RDNA, RDNA2), AMD CPUs (with SMT) have 1/2 core/CU
 		const float intel = (float)(contains(to_lower(vendor), "intel"))*(is_gpu?8.0f:0.5f); // Intel integrated GPUs usually have 8 cores/CU, Intel CPUs (with HT) have 1/2 core/CU
 		const float apple = (float)(contains(to_lower(vendor), "apple"))*(128.0f); // Apple ARM GPUs usually have 128 cores/CU
@@ -170,7 +166,7 @@ public:
 		write_file("bin/kernel.log", log); // save build log
 		if((uint)log.length()>2u) print_warning(log); // print build log
 #endif // LOG
-		if(error) print_error("OpenCL C code compilation failed with error code "+to_string(error)+". Make sure there are no errors in kernel.cpp (\"#define LOG\" might help). If your GPU is old, try uncommenting \"#define USE_OPENCL_1_1\".");
+		if(error) print_error("OpenCL C code compilation failed with error code "+to_string(error)+". Make sure there are no errors in kernel.cpp.");
 		else print_info("OpenCL C code successfully compiled.");
 #ifdef PTX // generate assembly (ptx) file for OpenCL code
 		write_file("bin/kernel.ptx", cl_program.getInfo<CL_PROGRAM_BINARIES>()[0]); // save binary (ptx file)
@@ -178,21 +174,11 @@ public:
 		this->exists = true;
 	}
 	inline Device() {} // default constructor
-	inline void finish_queue() {
-		cl_queue.finish();
-	}
-	inline cl::Context get_cl_context() const {
-		return cl_context;
-	}
-	inline cl::Program get_cl_program() const {
-		return cl_program;
-	}
-	inline cl::CommandQueue get_cl_queue() const {
-		return cl_queue;
-	}
-	inline bool is_initialized() const {
-		return exists;
-	}
+	inline void finish_queue() { cl_queue.finish(); }
+	inline cl::Context get_cl_context() const { return cl_context; }
+	inline cl::Program get_cl_program() const { return cl_program; }
+	inline cl::CommandQueue get_cl_queue() const { return cl_queue; }
+	inline bool is_initialized() const { return exists; }
 };
 
 template<typename T> class Memory {
@@ -207,22 +193,10 @@ private:
 	Device* device = nullptr; // pointer to linked Device
 	cl::CommandQueue cl_queue; // command queue
 	inline void initialize_auxiliary_pointers() {
-		x = s0 = host_buffer;
-		if(d>0x1u) y = s1 = host_buffer+N;
-		if(d>0x2u) z = s2 = host_buffer+N*0x2ull;
-		if(d>0x3u) w = s3 = host_buffer+N*0x3ull;
-		if(d>0x4u) s4 = host_buffer+N*0x4ull;
-		if(d>0x5u) s5 = host_buffer+N*0x5ull;
-		if(d>0x6u) s6 = host_buffer+N*0x6ull;
-		if(d>0x7u) s7 = host_buffer+N*0x7ull;
-		if(d>0x8u) s8 = host_buffer+N*0x8ull;
-		if(d>0x9u) s9 = host_buffer+N*0x9ull;
-		if(d>0xAu) sA = host_buffer+N*0xAull;
-		if(d>0xBu) sB = host_buffer+N*0xBull;
-		if(d>0xCu) sC = host_buffer+N*0xCull;
-		if(d>0xDu) sD = host_buffer+N*0xDull;
-		if(d>0xEu) sE = host_buffer+N*0xEull;
-		if(d>0xFu) sF = host_buffer+N*0xFull;
+		/********/ x = s0 = host_buffer; /******/ if(d>0x4u) s4 = host_buffer+N*0x4ull; if(d>0x8u) s8 = host_buffer+N*0x8ull; if(d>0xCu) sC = host_buffer+N*0xCull;
+		if(d>0x1u) y = s1 = host_buffer+N; /****/ if(d>0x5u) s5 = host_buffer+N*0x5ull; if(d>0x9u) s9 = host_buffer+N*0x9ull; if(d>0xDu) sD = host_buffer+N*0xDull;
+		if(d>0x2u) z = s2 = host_buffer+N*0x2ull; if(d>0x6u) s6 = host_buffer+N*0x6ull; if(d>0xAu) sA = host_buffer+N*0xAull; if(d>0xEu) sE = host_buffer+N*0xEull;
+		if(d>0x3u) w = s3 = host_buffer+N*0x3ull; if(d>0x7u) s7 = host_buffer+N*0x7ull; if(d>0xBu) sB = host_buffer+N*0xBull; if(d>0xFu) sF = host_buffer+N*0xFull;
 	}
 	inline void allocate_device_buffer(Device& device, const bool allocate_device) {
 		this->device = &device;
@@ -336,42 +310,18 @@ public:
 		if(host_buffer_exists) for(ulong i=0ull; i<N*(ulong)d; i++) host_buffer[i] = value;
 		write_to_device();
 	}
-	inline const ulong length() const {
-		return N;
-	}
-	inline const uint dimensions() const {
-		return d;
-	}
-	inline const ulong range() const {
-		return N*(ulong)d;
-	}
-	inline const ulong capacity() const { // returns capacity of the buffer in Byte
-		return N*(ulong)d*sizeof(T);
-	}
-	inline T* const data() {
-		return host_buffer;
-	}
-	inline const T* const data() const {
-		return host_buffer;
-	}
-	inline T* const operator()() {
-		return host_buffer;
-	}
-	inline const T* const operator()() const {
-		return host_buffer;
-	}
-	inline T& operator[](const ulong i) {
-		return host_buffer[i];
-	}
-	inline const T& operator[](const ulong i) const {
-		return host_buffer[i];
-	}
-	inline const T operator()(const ulong i) const {
-		return host_buffer[i];
-	}
-	inline const T operator()(const ulong i, const uint dimension) const {
-		return host_buffer[i+(ulong)dimension*N]; // array of structures
-	}
+	inline const ulong length() const { return N; }
+	inline const uint dimensions() const { return d; }
+	inline const ulong range() const { return N*(ulong)d; }
+	inline const ulong capacity() const { return N*(ulong)d*sizeof(T); } // returns capacity of the buffer in Byte
+	inline T* const data() { return host_buffer; }
+	inline const T* const data() const { return host_buffer; }
+	inline T* const operator()() { return host_buffer; }
+	inline const T* const operator()() const { return host_buffer; }
+	inline T& operator[](const ulong i) { return host_buffer[i]; }
+	inline const T& operator[](const ulong i) const { return host_buffer[i]; }
+	inline const T operator()(const ulong i) const { return host_buffer[i]; }
+	inline const T operator()(const ulong i, const uint dimension) const { return host_buffer[i+(ulong)dimension*N]; } // array of structures
 	inline void read_from_device(const bool blocking=true) {
 		if(host_buffer_exists&&device_buffer_exists) cl_queue.enqueueReadBuffer(device_buffer, blocking, 0u, capacity(), (void*)host_buffer);
 	}
@@ -466,28 +416,17 @@ public:
 			if(blocking) cl_queue.finish();
 		}
 	}
-	inline void enqueue_read_from_device() {
-		read_from_device(false);
-	}
-	inline void enqueue_write_to_device() {
-		write_to_device(false);
-	}
-	inline void enqueue_read_from_device(const ulong offset, const ulong length) {
-		read_from_device(offset, length, false);
-	}
-	inline void enqueue_write_to_device(const ulong offset, const ulong length) {
-		write_to_device(offset, length, false);
-	}
-	inline void finish_queue() {
-		cl_queue.finish();
-	}
-	inline const cl::Buffer& get_cl_buffer() const {
-		return device_buffer;
-	}
+	inline void enqueue_read_from_device() { read_from_device(false); }
+	inline void enqueue_write_to_device() { write_to_device(false); }
+	inline void enqueue_read_from_device(const ulong offset, const ulong length) { read_from_device(offset, length, false); }
+	inline void enqueue_write_to_device(const ulong offset, const ulong length) { write_to_device(offset, length, false); }
+	inline void finish_queue() { cl_queue.finish(); }
+	inline const cl::Buffer& get_cl_buffer() const { return device_buffer; }
 };
 
 class Kernel {
 private:
+	ulong N = 0ull; // kernel range
 	uint number_of_parameters = 0u;
 	cl::Kernel cl_kernel;
 	cl::NDRange cl_range_global, cl_range_local;
@@ -505,29 +444,30 @@ private:
 		link_parameter(starting_position, parameter);
 		link_parameters(starting_position+1u, parameters...);
 	}
-	inline void initialize_ranges(const ulong N, const ulong workgroup_size=(ulong)WORKGROUP_SIZE) {
-		cl_range_global = cl::NDRange(((N+workgroup_size-1ull)/workgroup_size)*workgroup_size); // make global range a multiple of local range
-		cl_range_local = cl::NDRange(workgroup_size);
-	}
 public:
 	template<class... T> inline Kernel(const Device& device, const ulong N, const string& name, const T&... parameters) { // accepts Memory<T> objects and fundamental data type constants
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str());
 		link_parameters(number_of_parameters, parameters...); // expand variadic template to link kernel parameters
-		initialize_ranges(N);
+		set_ranges(N);
 		cl_queue = device.get_cl_queue();
 	}
 	template<class... T> inline Kernel(const Device& device, const ulong N, const uint workgroup_size, const string& name, const T&... parameters) { // accepts Memory<T> objects and fundamental data type constants
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
 		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str());
 		link_parameters(number_of_parameters, parameters...); // expand variadic template to link kernel parameters
-		initialize_ranges(N, (ulong)workgroup_size);
+		set_ranges(N, (ulong)workgroup_size);
 		cl_queue = device.get_cl_queue();
 	}
 	inline Kernel() {} // default constructor
-	inline uint get_number_of_parameters() const {
-		return number_of_parameters;
+	inline Kernel& set_ranges(const ulong N, const ulong workgroup_size=(ulong)WORKGROUP_SIZE) {
+		this->N = N;
+		cl_range_global = cl::NDRange(((N+workgroup_size-1ull)/workgroup_size)*workgroup_size); // make global range a multiple of local range
+		cl_range_local = cl::NDRange(workgroup_size);
+		return *this;
 	}
+	inline const ulong range() const { return N; }
+	inline uint get_number_of_parameters() const { return number_of_parameters; }
 	template<class... T> inline Kernel& add_parameters(const T&... parameters) { // add parameters to the list of existing parameters
 		link_parameters(number_of_parameters, parameters...); // expand variadic template to link kernel parameters
 		return *this;

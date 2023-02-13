@@ -1,23 +1,55 @@
 # FluidX3D
 
-The fastest and most memory efficient lattice Boltzmann CFD software, running on any GPU via [OpenCL](https://github.com/ProjectPhysX/OpenCL-Wrapper "OpenCL-Wrapper").
+The fastest and most memory efficient lattice Boltzmann CFD software, running on all GPUs via [OpenCL](https://github.com/ProjectPhysX/OpenCL-Wrapper "OpenCL-Wrapper").
 
-<a href="https://youtu.be/5AzxwQpng0M"><img src="https://img.youtube.com/vi/5AzxwQpng0M/maxresdefault.jpg" alt="10 billion voxel Space Shuttle simulation" width="50%"></img></a><a href="https://youtu.be/VadLwt9OqMo"><img src="https://img.youtube.com/vi/VadLwt9OqMo/maxresdefault.jpg" alt="1 billion voxel raindrop simulation" width="50%"></img></a><br>
-<a href="https://youtu.be/NQPgumd3Ei8"><img src="https://img.youtube.com/vi/NQPgumd3Ei8/maxresdefault.jpg" alt="Hydraulic jump simulation" width="50%"></img></a><a href="https://youtu.be/3JNVBQyetMA"><img src="https://img.youtube.com/vi/3JNVBQyetMA/maxresdefault.jpg" alt="Star Wars X-wing simulation" width="50%"></img></a>
+<a href="https://youtu.be/o3TPN142HxM"><img src="https://img.youtube.com/vi/o3TPN142HxM/maxresdefault.jpg" width="50%"></img></a><a href="https://youtu.be/oC6U1M0Fsug"><img src="https://img.youtube.com/vi/oC6U1M0Fsug/maxresdefault.jpg" width="50%"></img></a><br>
+<a href="https://youtu.be/NQPgumd3Ei8"><img src="https://img.youtube.com/vi/NQPgumd3Ei8/maxresdefault.jpg" width="50%"></img></a><a href="https://youtu.be/aqG8qZ_Gc4U"><img src="https://img.youtube.com/vi/aqG8qZ_Gc4U/maxresdefault.jpg" width="50%"></img></a>
 
+
+<details><summary>Update History</summary>
+
+- v1.0 (04.08.2022)
+  - initial release
+- v1.1 (29.09.2022)
+  - added solid voxelization on GPU (slow algorithm)
+  - added tool to print current camera position (key_H)
+  - minor bug fix (workaround for Intel iGPU driver bug with triangle rendering)
+- v1.2 (24.10.2022)
+  - added functions to compute force/torque on objects
+  - added function to translate Mesh
+  - added Stokes drag validation setup
+- v1.3 (10.11.2022)
+  - added unit conversion functions for torque
+  - `FORCE_FIELD` and `VOLUME_FORCE` can now be used independently
+  - minor bug fix (workaround for AMD legacy driver bug with binary number literals)
+- v1.4 (14.12.2022)
+  - added interactive graphics mode on Linux with X11
+  - fixed streamline visualization bug in 2D
+- v2.0 (09.01.2023)
+  - added (cross-vendor) multi-GPU support on a single node (PC/laptop/server)
+- v2.1 (15.01.2023)
+  - made solid voxelization on GPU lightning fast (new algorithm, from minutes to milliseconds)
+- v2.2 (20.01.2023)
+  - added option to voxelize moving/rotating geometry on GPU, with automatic velocity initialization for each grid point based on center of rotation, linear velocity and rotational velocity
+  - cells that are converted from solid->fluid during re-voxelization now have their DDFs properly initialized
+  - added option to not auto-scale mesh during `read_stl(...)`, with negative `size` parameter
+  - added kernel for solid boundary rendering with marching-cubes
+- v2.3 (30.01.2023)
+  - added particles with immersed-boundary method (either passive or 2-way-coupled, only supported with single-GPU)
+  - minor optimization to GPU voxelization algorithm (workgroup threads outside mesh bounding-box return after ray-mesh intersections have been found)
+  - displayed GPU memory allocation size is now fully accurate
+  - fixed bug in `write_line()` function in `src/utilities.hpp`
+  - removed `.exe` file extension for Linux/macOS
+
+</details>
 
 
 ## Compute Features
 
 - CFD model: lattice Boltzmann method (LBM)
-  - streaming (part 2/2): <p align="center"><i>f</i><sub>0</sub><sup>temp</sup>(<i>x</i>,<i>t</i>) = <i>f</i><sub>0</sub>(<i>x</i>, <i>t</i>)<br>
-<i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>) = <i>f</i><sub>(<i>t</i>%2 ? <i>i</i> : (<i>i</i>%2 ? <i>i</i>+1 : <i>i</i>-1))</sub>(<i>i</i>%2 ? <i>x</i> : <i>x</i>-<i>e<sub>i</sub></i>, <i>t</i>) &nbsp; for &nbsp; <i>i</i> &isin; [1, <i>q</i>-1]</p>
-  - collision: <p align="center"><i>&rho;</i>(<i>x</i>,<i>t</i>) = (&Sigma;<sub><i>i</i></sub> <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>)) + 1<br><br>
-<i>u</i>(<i>x</i>,<i>t</i>) = <sup>1</sup>&#8725;<sub><i>&rho;</i>(<i>x</i>,<i>t</i>)</sub> &Sigma;<sub><i>i</i></sub> <i>c<sub>i</sub></i> <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>)<br><br>
-<i>f<sub>i</sub></i><sup>eq-shifted</sup>(<i>x</i>,<i>t</i>) = <i>w<sub>i</sub></i> <i>&rho;</i> · (<sup>(<i>u</i><sub>°</sub><i>c<sub>i</sub></i>)<sup>2</sup></sup>&#8725;<sub>(2<i>c</i><sup>4</sup>)</sub> - <sup>(<i>u</i><sub>°</sub><i>u</i>)</sup>&#8725;<sub>(2c<sup>2</sup>)</sub> + <sup>(<i>u</i><sub>°</sub><i>c<sub>i</sub></i>)</sup>&#8725;<sub><i>c</i><sup>2</sup></sub>) + <i>w<sub>i</sub></i> (<i>&rho;</i>-1)<br><br>
-<i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>) + <i>&Omega;<sub>i</sub></i>(<i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>), <i>f<sub>i</sub></i><sup>eq-shifted</sup>(<i>x</i>,<i>t</i>), <i>&tau;</i>)</p>
-  - streaming (part 1/2): <p align="center"><i>f</i><sub>0</sub>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f</i><sub>0</sub><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>)<br>
-<i>f</i><sub>(<i>t</i>%2 ? (<i>i</i>%2 ? <i>i</i>+1 : <i>i</i>-1) : <i>i</i>)</sub>(<i>i</i>%2 ? <i>x</i>+<i>e<sub>i</sub></i> : <i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) &nbsp; for &nbsp; <i>i</i> &isin; [1, <i>q</i>-1]</p>
+</details><details><summary>&nbsp; &nbsp; &nbsp; &nbsp;&#9900;&nbsp; streaming (part 2/2)</summary><p align="center"><i>f</i><sub>0</sub><sup>temp</sup>(<i>x</i>,<i>t</i>) = <i>f</i><sub>0</sub>(<i>x</i>, <i>t</i>)<br><i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>) = <i>f</i><sub>(<i>t</i>%2 ? <i>i</i> : (<i>i</i>%2 ? <i>i</i>+1 : <i>i</i>-1))</sub>(<i>i</i>%2 ? <i>x</i> : <i>x</i>-<i>e<sub>i</sub></i>, <i>t</i>) &nbsp; for &nbsp; <i>i</i> &isin; [1, <i>q</i>-1]</p></details>
+</details><details><summary>&nbsp; &nbsp; &nbsp; &nbsp;&#9900;&nbsp; collision</summary><p align="center"><i>&rho;</i>(<i>x</i>,<i>t</i>) = (&Sigma;<sub><i>i</i></sub> <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>)) + 1<br><br><i>u</i>(<i>x</i>,<i>t</i>) = <sup>1</sup>&#8725;<sub><i>&rho;</i>(<i>x</i>,<i>t</i>)</sub> &Sigma;<sub><i>i</i></sub> <i>c<sub>i</sub></i> <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>)<br><br><i>f<sub>i</sub></i><sup>eq-shifted</sup>(<i>x</i>,<i>t</i>) = <i>w<sub>i</sub></i> <i>&rho;</i> · (<sup>(<i>u</i><sub>°</sub><i>c<sub>i</sub></i>)<sup>2</sup></sup>&#8725;<sub>(2<i>c</i><sup>4</sup>)</sub> - <sup>(<i>u</i><sub>°</sub><i>u</i>)</sup>&#8725;<sub>(2c<sup>2</sup>)</sub> + <sup>(<i>u</i><sub>°</sub><i>c<sub>i</sub></i>)</sup>&#8725;<sub><i>c</i><sup>2</sup></sub>) + <i>w<sub>i</sub></i> (<i>&rho;</i>-1)<br><br><i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>) + <i>&Omega;<sub>i</sub></i>(<i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>,<i>t</i>), <i>f<sub>i</sub></i><sup>eq-shifted</sup>(<i>x</i>,<i>t</i>), <i>&tau;</i>)</p></details>
+</details><details><summary>&nbsp; &nbsp; &nbsp; &nbsp;&#9900;&nbsp; streaming (part 1/2)</summary><p align="center"><i>f</i><sub>0</sub>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f</i><sub>0</sub><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>)<br><i>f</i><sub>(<i>t</i>%2 ? (<i>i</i>%2 ? <i>i</i>+1 : <i>i</i>-1) : <i>i</i>)</sub>(<i>i</i>%2 ? <i>x</i>+<i>e<sub>i</sub></i> : <i>x</i>, <i>t</i>+&Delta;<i>t</i>) = <i>f<sub>i</sub></i><sup>temp</sup>(<i>x</i>, <i>t</i>+&Delta;<i>t</i>) &nbsp; for &nbsp; <i>i</i> &isin; [1, <i>q</i>-1]</p></details>
 
 <!-- markdown equations don't render properly in mobile browser
 
@@ -38,20 +70,107 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
  -->
 
 - peak performance on most GPUs (datacenter/gaming/professional/laptop), validated with roofline model
-- up to 4.29 billion (2³²) lattice points, or 1624³ resolution, on a single GPU (if it has 225 GB memory)
-- optimized to minimize memory demand to 55 Bytes/node (~⅙ (~⅓) of conventional FP64 (FP32) LBM solvers)
-  - in-place streaming with [Esoteric-Pull](https://doi.org/10.3390/computation10060092): almost cuts memory demand in half and slightly increases performance due to implicit bounce-back boundaries; offers optimal memory access patterns for single-node in-place streaming
+- multi-GPU support on a single node (PC/laptop/server) via domain decomposition
+  - allows pooling VRAM from multiple GPUs for much larger grid resolution
+  - each domain (GPU) can hold up to 4.29 billion (2³², 1624³) lattice points (225 GB memory)
+  - GPUs don't have to be identical (not even from the same vendor), but similar VRAM capacity/bandwidth is recommended
+
+<details><summary>&nbsp; &nbsp; &nbsp; &nbsp;&#9900;&nbsp; domain communication architecture (simplified)</summary>
+
+```diff
+++   .-----------------------------------------------------------------.   ++
+++   |                              GPU 0                              |   ++
+++   |                          LBM Domain 0                           |   ++
+++   '-----------------------------------------------------------------'   ++
+++              |                 selective                /|\             ++
+++             \|/               in-VRAM copy               |              ++
+++        .-------------------------------------------------------.        ++
+++        |               GPU 0 - Transfer Buffer 0               |        ++
+++        '-------------------------------------------------------'        ++
+!!                            |     PCIe     /|\                           !!
+!!                           \|/    copy      |                            !!
+@@        .-------------------------.   .-------------------------.        @@
+@@        | CPU - Transfer Buffer 0 |   | CPU - Transfer Buffer 1 |        @@
+@@        '-------------------------'\ /'-------------------------'        @@
+@@                           pointer  X   swap                             @@
+@@        .-------------------------./ \.-------------------------.        @@
+@@        | CPU - Transfer Buffer 1 |   | CPU - Transfer Buffer 0 |        @@
+@@        '-------------------------'   '-------------------------'        @@
+!!                           /|\    PCIe      |                            !!
+!!                            |     copy     \|/                           !!
+++        .-------------------------------------------------------.        ++
+++        |               GPU 1 - Transfer Buffer 1               |        ++
+++        '-------------------------------------------------------'        ++
+++             /|\                selective                 |              ++
+++              |                in-VRAM copy              \|/             ++
+++   .-----------------------------------------------------------------.   ++
+++   |                              GPU 1                              |   ++
+++   |                          LBM Domain 1                           |   ++
+++   '-----------------------------------------------------------------'   ++
+##                                    |                                    ##
+##                      domain synchronization barrier                     ##
+##                                    |                                    ##
+||   -------------------------------------------------------------> time   ||
+```
+
+</details><details><summary>&nbsp; &nbsp; &nbsp; &nbsp;&#9900;&nbsp; domain communication architecture (detailed)</summary>
+
+```diff
+++   .-----------------------------------------------------------------.   ++
+++   |                              GPU 0                              |   ++
+++   |                          LBM Domain 0                           |   ++
+++   '-----------------------------------------------------------------'   ++
+++     |  selective in- /|\  |  selective in- /|\  |  selective in- /|\    ++
+++    \|/ VRAM copy (X)  |  \|/ VRAM copy (Y)  |  \|/ VRAM copy (Z)  |     ++
+++   .---------------------.---------------------.---------------------.   ++
+++   |    GPU 0 - TB 0X+   |    GPU 0 - TB 0Y+   |    GPU 0 - TB 0Z+   |   ++
+++   |    GPU 0 - TB 0X-   |    GPU 0 - TB 0Y-   |    GPU 0 - TB 0Z-   |   ++
+++   '---------------------'---------------------'---------------------'   ++
+!!          | PCIe /|\            | PCIe /|\            | PCIe /|\         !!
+!!         \|/ copy |            \|/ copy |            \|/ copy |          !!
+@@   .---------. .---------.---------. .---------.---------. .---------.   @@
+@@   | CPU 0X+ | | CPU 1X- | CPU 0Y+ | | CPU 3Y- | CPU 0Z+ | | CPU 5Z- |   @@
+@@   | CPU 0X- | | CPU 2X+ | CPU 0Y- | | CPU 4Y+ | CPU 0Z- | | CPU 6Z+ |   @@
+@@   '---------\ /---------'---------\ /---------'---------\ /---------'   @@
+@@      pointer X swap (X)    pointer X swap (Y)    pointer X swap (Z)     @@
+@@   .---------/ \---------.---------/ \---------.---------/ \---------.   @@
+@@   | CPU 1X- | | CPU 0X+ | CPU 3Y- | | CPU 0Y+ | CPU 5Z- | | CPU 0Z+ |   @@
+@@   | CPU 2X+ | | CPU 0X- | CPU 4Y+ | | CPU 0Y- | CPU 6Z+ | | CPU 0Z- |   @@
+@@   '---------' '---------'---------' '---------'---------' '---------'   @@
+!!         /|\ PCIe |            /|\ PCIe |            /|\ PCIe |          !!
+!!          | copy \|/            | copy \|/            | copy \|/         !!
+++   .--------------------. .-------------------. .--------------------.   ++
+++   |   GPU 1 - TB 1X-   | |   GPU 3 - TB 3Y-  | |   GPU 5 - TB 5Z-   |   ++
+++   '--------------------' '-------------------' '--------------------'   ++
+++   .--------------------. .-------------------. .--------------------.   ++
+++   |   GPU 2 - TB 2X+   | |   GPU 4 - TB 4Y+  | |   GPU 6 - TB 6Z+   |   ++
+++   '--------------------' '-------------------' '--------------------'   ++
+++    /|\ selective in-  |  /|\ selective in-  |  /|\ selective in-  |     ++
+++     |  VRAM copy (X) \|/  |  VRAM copy (Y) \|/  |  VRAM copy (Z) \|/    ++
+++   .--------------------. .-------------------. .--------------------.   ++
+++   |        GPU 1       | |       GPU 3       | |        GPU 5       |   ++
+++   |    LBM Domain 1    | |   LBM Domain 3    | |    LBM Domain 5    |   ++
+++   '--------------------' '-------------------' '--------------------'   ++
+++   .--------------------. .-------------------. .--------------------.   ++
+++   |        GPU 2       | |       GPU 4       | |        GPU 6       |   ++
+++   |    LBM Domain 2    | |   LBM Domain 4    | |    LBM Domain 6    |   ++
+++   '--------------------' '-------------------' '--------------------'   ++
+##              |                     |                     |              ##
+##           domain                domain                domain            ##
+##       synchronization       synchronization       synchronization       ##
+##           barrier               barrier               barrier           ##
+##              |                     |                     |              ##
+||   -------------------------------------------------------------> time   ||
+```
+
+</details>
+
+- optimized to minimize memory demand to 55 Bytes/node (~⅙|~⅓ of conventional FP64|FP32 LBM solvers)
+  - in-place streaming with [Esoteric-Pull](https://doi.org/10.3390/computation10060092): almost cuts memory demand in half and slightly increases performance due to implicit bounce-back boundaries; offers optimal memory access patterns for single-cell in-place streaming
   - [decoupled arithmetic precision (FP32) and memory precision (FP32 or FP16S or FP16C)](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats): all arithmetic is done in FP32 for compatibility on all hardware, but LBM density distribution functions in memory can be compressed to FP16S or FP16C: almost cuts memory demand in half again and almost doubles performance, without impacting overall accuracy for most setups
 - [DDF-shifting](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats) and other algebraic optimization to minimize round-off error
-- updating density and velocity in the `stream_collide()` kernel is optional (higher performance if disabled)
-- velocity sets:
-  - D2Q9
-  - D3Q15
-  - D3Q19 (default)
-  - D3Q27
-- collision operators
-  - single-relaxation-time (SRT/BGK) (default)
-  - two-relaxation-time (TRT)
+- velocity sets: D2Q9, D3Q15, D3Q19 (default), D3Q27
+- collision operators: single-relaxation-time (SRT/BGK) (default), two-relaxation-time (TRT)
 - only 8 flag bits per lattice point (can be used independently / at the same time):
   - `TYPE_S` (stationary or moving) solid boundaries
   - `TYPE_E` equilibrium boundaries (inflow/outflow)
@@ -83,19 +202,17 @@ $$f_j(i\\%2\\ ?\\ \vec{x}+\vec{e}_i\\ :\\ \vec{x},\\ t+\Delta t)=f_i^\textrm{tem
   - D3Q7 subgrid for thermal DDFs
   - in-place streaming with [Esoteric-Pull](https://doi.org/10.3390/computation10060092) for thermal DDFs
   - optional [FP16S or FP16C compression](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats) for thermal DDFs with [DDF-shifting](https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats)
-- Smagorinsky-Lilly subgrid turbulence LES model to keep simulations with very large Reynolds number stable <details><summary>equations</summary><p align="center"><i>&Pi;<sub>&alpha;&beta;</sub></i> = &Sigma;<sub><i>i</i></sub> <i>e<sub>i&alpha;</sub></i> <i>e<sub>i&beta;</sub></i> (<i>f<sub>i</sub></i> - <i>f<sub>i</sub></i><sup>eq-shifted</sup>)<br><br>
-Q = &Sigma;<sub><i>&alpha;&beta;</i></sub> <i>&Pi;<sub>&alpha;&beta;</sub></i><sup>2</sup><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;______________________<br>
-&tau; = &frac12; (&tau;<sub>0</sub> + &radic; &tau;<sub>0</sub><sup>2</sup> + <sup>(16&radic;2)</sup>&#8725;<sub>(<i>3&pi;</i><sup>2</sup>)</sub> <sup>&radic;Q</sup>&#8725;<sub><i>&rho;</i></sub> )
-</p></details>
-
+- Smagorinsky-Lilly subgrid turbulence LES model to keep simulations with very large Reynolds number stable
+  <details><summary>&#9900; &nbsp;equations</summary><p align="center"><i>&Pi;<sub>&alpha;&beta;</sub></i> = &Sigma;<sub><i>i</i></sub> <i>e<sub>i&alpha;</sub></i> <i>e<sub>i&beta;</sub></i> (<i>f<sub>i</sub></i> - <i>f<sub>i</sub></i><sup>eq-shifted</sup>)<br><br>Q = &Sigma;<sub><i>&alpha;&beta;</i></sub> <i>&Pi;<sub>&alpha;&beta;</sub></i><sup>2</sup><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;______________________<br>&tau; = &frac12; (&tau;<sub>0</sub> + &radic; &tau;<sub>0</sub><sup>2</sup> + <sup>(16&radic;2)</sup>&#8725;<sub>(<i>3&pi;</i><sup>2</sup>)</sub> <sup>&radic;Q</sup>&#8725;<sub><i>&rho;</i></sub> )</p></details>
+- particles with immersed-boundary method (either passive or 2-way-coupled, only supported with single-GPU)
 
 
 
 ## Graphics Features
 
-- on Windows: real time [interactive rasterization and raytracing graphics](https://www.researchgate.net/publication/360501260_Combined_scientific_CFD_simulation_and_interactive_raytracing_with_OpenCL)
-- on Windows and Linux (even in WSL and/or in a remote console through SSH): real time interactive ASCII console graphics
+- on Windows and Linux: real time [interactive rasterization and raytracing graphics](https://www.researchgate.net/publication/360501260_Combined_scientific_CFD_simulation_and_interactive_raytracing_with_OpenCL)
+- on Windows and Linux (even in WSL and/or remote through SSH): real time interactive ASCII console graphics
+- rendering is fully parallelized for multi-GPU via seamless domain decomposition rasterization
 - with interactive graphics mode disabled, image resolution can be as large as VRAM allows for (132 Megapixel (16K) and above)
 - (interacitive) visualization modes:
   - flags (and force vectors on solid boundary nodes if the extension is used)
@@ -112,12 +229,12 @@ Q = &Sigma;<sub><i>&alpha;&beta;</i></sub> <i>&Pi;<sub>&alpha;&beta;</sub></i><s
 1. Check the settings and extensions in [`src/defines.hpp`](src/defines.hpp) by uncommenting corresponding lines.
 2. Write a C++ setup skript as `main_setup()` function in [`src/setup.cpp`](src/setup.cpp) (get inspiration from existing setups):
    - For unit conversion, use the `units` struct.
-   - For initializing the box, use call `LBM lbm(...);` constructor.
+   - For initializing the box, use call `LBM lbm(Nx, Ny, Nz, nu, ...);` constructor. To use multiple GPUs, use `LBM lbm(Nx, Ny, Nz, Dx, Dy, Dz, nu, ...);`, with `Dx`/`Dy`/`Dz` indicating how many domains (GPUs) there are in each spatial direction.
    - Set the initial condition in a loop that iterates over the entire lattice by writing to `lbm.rho[n]`/`lbm.u.x[n]`/`lbm.u.y[n]`/`lbm.u.z[n]`/`lbm.flags[n]`.
-   - Call `lbm.run()` to initialize and execute the setup (infinite time steps) or `lbm.run(time_steps)` to execute only a specific number of time steps.
+   - Call `lbm.run();` to initialize and execute the setup (infinite time steps) or `lbm.run(time_steps);` to execute only a specific number of time steps.
    - As long as the `lbm` object is in scope, you can access the memory. As soon as it goes out of scope, all memory associated to the current simulation is freed again.
-3. When done with the setup, hit compile+run on Windows in Visual Studio Community or execute `./make.sh` on Linux; this will automatically select the fastest installed GPU. Alternatively, you can add the device ID as the first command-line argument, for example `./make.sh 2` to compile+run on device 2, or `bin/FluidX3D.exe 2` to run the executable on device 2. Compile time for the entire code is about 10 seconds.
-4. On Windows with `WINDOWS_GRAPHICS`/`CONSOLE_GRAPHICS` or on Linux with `CONSOLE_GRAPHICS`, press the <kbd>P</kbd> key to start/pause the simulation.
+3. When done with the setup, on Windows in Visual Studio Community select "Release" and "x64" and hit compile+run, or on Linux execute `chmod +x make.sh` and `./make.sh`; this will automatically select the fastest installed GPU(s). Alternatively, you can add the device ID(s) as command-line arguments, for example `./make.sh 2` to compile+run on device 2, or `bin/FluidX3D 1 3` to run the executable on devices 1 and 3. Compile time for the entire code is about 10 seconds. If you use `INTERACTIVE_GRAPHICS` on Linux, change to the "compile on Linux with X11" command in `make.sh`.
+4. With `INTERACTIVE_GRAPHICS`/`INTERACTIVE_GRAPHICS_ASCII` enabled, press the <kbd>P</kbd> key to start/pause the simulation.
 
    Toggle rendering modes with the keyboard:
    - <kbd>1</kbd>: flags (and force vectors on solid boundary nodes if the extension is used)
@@ -154,25 +271,30 @@ Q = &Sigma;<sub><i>&alpha;&beta;</i></sub> <i>&Pi;<sub>&alpha;&beta;</sub></i><s
   - Xeon Phi
   - CPUs
   - even smartphone ARM GPUs
-- supports importing and voxelizing triangle meshes from binary `.stl` files
+- supports parallelization across multiple GPUs on a single node (PC/laptop/server) with PCIe communication, no SLI/Crossfire/NVLink/InfinityFabric or MPI installation required; the GPUs don't even have to be from the same vendor, but similar memory capacity and bandwidth is recommended
+- supports importing and voxelizing triangle meshes from binary `.stl` files, with fast GPU voxelization
 - supports exporting volumetric data as binary `.vtk` files
 - supports exporting rendered frames as `.png`/`.qoi`/`.bmp` files; time-consuming image encoding is handled in parallel on the CPU while the simulation on GPU can continue without delay
 
 
 
-## Benchmarks
+## Single-GPU Benchmarks
 
 Here are [performance benchmarks](https://doi.org/10.3390/computation10060092) on various hardware in MLUPs/s, or how many million lattice points are updated per second. The settings used for the benchmark are D3Q19 SRT with no extensions enabled (only LBM with implicit mid-grid bounce-back boundaries) and the setup consists of an empty cubic box with sufficient size (typically 256³). Without extensions, a single lattice point requires:
 - a memory capacity of 93 (FP32/FP32) or 55 (FP32/FP16) Bytes
 - a memory bandwidth of 153 (FP32/FP32) or 77 (FP32/FP16) Bytes per time step
-- 326 (FP32/FP32) or 364 (FP32/FP16S) or 1241 (FP32/FP16C) FLOPs per time step (FP32+INT32 operations counted combined)
+- 363 (FP32/FP32) or 406 (FP32/FP16S) or 1275 (FP32/FP16C) FLOPs per time step (FP32+INT32 operations counted combined)
 
-In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP32) or 4.73 (FP32/FP16S) or 16.12 (FP32/FP16C) FLOPs/Byte. So performance is only limited by memory bandwidth.
+In consequence, the arithmetic intensity of this implementation is 2.37 (FP32/FP32) or 5.27 (FP32/FP16S) or 16.56 (FP32/FP16C) FLOPs/Byte. So performance is only limited by memory bandwidth.
 
-| Device                        | FP32<br>[TFLOPs/s] | Mem<br>[GB] | BW<br>[GB/s] | FP32/FP32<br>[MLUPs/s] | FP32/FP16S<br>[MLUPs/s] | FP32/FP16C<br>[MLUPs/s] |
+If your GPU is not on the list yet, you can report your benchmarks [here](https://github.com/ProjectPhysX/FluidX3D/issues/8).
+
+| Device                        | FP32<br>[TFlops/s] | Mem<br>[GB] | BW<br>[GB/s] | FP32/FP32<br>[MLUPs/s] | FP32/FP16S<br>[MLUPs/s] | FP32/FP16C<br>[MLUPs/s] |
 | :---------------------------- | -----------------: | ----------: | -----------: | ---------------------: | ----------------------: | ----------------------: |
 | AMD Instinct MI250 (1 GCD)    |              45.26 |          64 |         1638 |             5638 (53%) |              9030 (42%) |              8506 (40%) |
 | AMD Radeon VII                |              13.83 |          16 |         1024 |             4898 (73%) |              7778 (58%) |              5256 (40%) |
+| Nvidia H100 PCIe 80GB         |              51.01 |          80 |         2000 |            11128 (85%) |             20624 (79%) |             13862 (53%) |
+| Nvidia A100 SXM4 80GB         |              19.49 |          80 |         2039 |            10228 (77%) |             18448 (70%) |             11197 (42%) |
 | Nvidia A100 SXM4 40GB         |              19.49 |          40 |         1555 |             8522 (84%) |             16013 (79%) |             11251 (56%) |
 | Nvidia A100 PCIe 40GB         |              19.49 |          40 |         1555 |             8526 (84%) |             16035 (79%) |             11088 (55%) |
 | Nvidia Tesla V100 16GB        |              14.13 |          16 |          900 |             5128 (87%) |             10325 (88%) |              7683 (66%) |
@@ -182,34 +304,49 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 | Nvidia Tesla K40m             |               4.29 |          12 |          288 |             1131 (60%) |              1868 (50%) |               912 (24%) |
 | Nvidia Tesla K80  (1 GPU)     |               4.11 |          12 |          240 |              916 (58%) |              1642 (53%) |               943 (30%) |
 | Nvidia Tesla K20c             |               3.52 |           5 |          208 |              861 (63%) |              1507 (56%) |               720 (27%) |
-| AMD Radeon RX 6900 XT         |              20.63 |          16 |          512 |             1968 (59%) |              4227 (64%) |              4207 (63%) |
+| AMD Radeon RX 7900 XTX        |              61.44 |          24 |          960 |             3311 (53%) |              6566 (53%) |              6903 (55%) |
+| AMD Radeon RX 7900 XT         |              51.61 |          20 |          800 |             3013 (58%) |              5856 (56%) |              5986 (58%) |
+| AMD Radeon RX 6900 XT         |              23.04 |          16 |          512 |             1968 (59%) |              4227 (64%) |              4207 (63%) |
+| AMD Radeon RX 6800 XT         |              20.74 |          16 |          512 |             2008 (60%) |              4241 (64%) |              4224 (64%) |
 | AMD Radeon RX 5700 XT         |               9.75 |           8 |          448 |             1368 (47%) |              3253 (56%) |              3049 (52%) |
 | AMD Radeon RX Vega 64         |              13.35 |           8 |          484 |             1875 (59%) |              2878 (46%) |              3227 (51%) |
 | AMD Radeon RX 580 4GB         |               6.50 |           4 |          256 |              946 (57%) |              1848 (56%) |              1577 (47%) |
+| AMD Radeon HD 7850            |               1.84 |           2 |          154 |              112 (11%) |               120 ( 6%) |               635 (32%) |
+| Intel Arc A770 LE             |              19.66 |          16 |          560 |             2741 (75%) |              4591 (63%) |              4626 (64%) |
+| Intel Arc A750 LE             |              17.20 |           8 |          512 |             2625 (78%) |              4184 (63%) |              4238 (64%) |
+| Nvidia GeForce RTX 4090       |              82.58 |          24 |         1008 |             5624 (85%) |             11091 (85%) |             11496 (88%) |
+| Nvidia GeForce RTX 4080       |              55.45 |          16 |          717 |             3914 (84%) |              7626 (82%) |              7933 (85%) |
 | Nvidia GeForce RTX 3090 Ti    |              40.00 |          24 |         1008 |             5717 (87%) |             10956 (84%) |             10400 (79%) |
 | Nvidia GeForce RTX 3090       |              39.05 |          24 |          936 |             5418 (89%) |             10732 (88%) |             10215 (84%) |
 | Nvidia GeForce RTX 3080 Ti    |              37.17 |          12 |          912 |             5202 (87%) |              9832 (87%) |              9347 (79%) |
-| Nvidia GeForce RTX 3080 10GB  |              29.77 |          10 |          760 |             4230 (85%) |              8118 (82%) |              7714 (78%) |
+| Nvidia GeForce RTX 3080       |              29.77 |          10 |          760 |             4230 (85%) |              8118 (82%) |              7714 (78%) |
+| Nvidia GeForce RTX 3070       |              20.31 |           8 |          448 |             2578 (88%) |              5096 (88%) |              5060 (87%) |
 | Nvidia GeForce RTX 3060 Ti    |              16.49 |           8 |          448 |             2644 (90%) |              5129 (88%) |              4718 (81%) |
+| Nvidia RTX A5000M             |              16.59 |          16 |          448 |             2228 (76%) |              4461 (77%) |              3662 (63%) |
 | Nvidia GeForce RTX 3060       |              13.17 |          12 |          360 |             2108 (90%) |              4070 (87%) |              3566 (76%) |
 | Nvidia GeForce RTX 3060M      |              10.94 |           6 |          336 |             2019 (92%) |              4012 (92%) |              3572 (82%) |
 | Nvidia GeForce RTX 3050M      |               7.13 |           4 |          192 |             1180 (94%) |              2339 (94%) |              2016 (81%) |
-| Nvidia Quadro RTX 8000 Server |              14.93 |          48 |          624 |             2591 (64%) |              5408 (67%) |              5607 (69%) |
+| Nvidia Quadro RTX 6000        |              16.31 |          24 |          672 |             3307 (75%) |              6836 (78%) |              6879 (79%) |
+| Nvidia Quadro RTX 8000 Pass.  |              14.93 |          48 |          624 |             2591 (64%) |              5408 (67%) |              5607 (69%) |
 | Nvidia GeForce RTX 2080 Ti    |              13.45 |          11 |          616 |             3194 (79%) |              6700 (84%) |              6853 (86%) |
-| Nvidia GeForce RTX 2080 Super |              11.34 |           8 |          496 |             2434 (75%) |              5284 (82%) |              5087 (79%) |
+| Nvidia GeForce RTX 2080 Sup.  |              11.34 |           8 |          496 |             2434 (75%) |              5284 (82%) |              5087 (79%) |
 | Nvidia Quadro RTX 5000        |              11.15 |          16 |          448 |             2341 (80%) |              4766 (82%) |              4773 (82%) |
-| Nvidia GeForce RTX 2060 Super |               7.18 |           8 |          448 |             2503 (85%) |              5035 (87%) |              4463 (77%) |
+| Nvidia GeForce RTX 2060 Sup.  |               7.18 |           8 |          448 |             2503 (85%) |              5035 (87%) |              4463 (77%) |
 | Nvidia Quadro RTX 4000        |               7.12 |           8 |          416 |             2284 (84%) |              4584 (85%) |              4062 (75%) |
 | Nvidia GeForce RTX 2060 KO    |               6.74 |           6 |          336 |             1643 (75%) |              3376 (77%) |              3266 (75%) |
-| Nvidia GeForce GTX 1660 Super |               5.03 |           6 |          336 |             1696 (77%) |              3551 (81%) |              3040 (70%) |
+| Nvidia GeForce RTX 2060       |               6.74 |           6 |          336 |             1681 (77%) |              3604 (83%) |              3571 (82%) |
+| Nvidia GeForce GTX 1660 Sup.  |               5.03 |           6 |          336 |             1696 (77%) |              3551 (81%) |              3040 (70%) |
 | Nvidia Tesla T4               |               8.14 |          15 |          300 |             1356 (69%) |              2869 (74%) |              2887 (74%) |
 | Nvidia GeForce GTX 1660 Ti    |               5.48 |           6 |          288 |             1467 (78%) |              3041 (81%) |              3019 (81%) |
+| Nvidia GeForce GTX 1660       |               5.07 |           6 |          192 |             1016 (81%) |              1924 (77%) |              1992 (80%) |
+| Nvidia GeForce GTX 1650M      |               3.20 |           4 |          128 |              706 (84%) |              1214 (73%) |              1400 (84%) |
 | Nvidia Titan Xp               |              12.15 |          12 |          548 |             2919 (82%) |              5495 (77%) |              5375 (76%) |
 | Nvidia GeForce GTX 1080 Ti    |              12.06 |          11 |          484 |             2631 (83%) |              4837 (77%) |              4877 (78%) |
 | Nvidia GeForce GTX 1080       |               9.78 |           8 |          320 |             1623 (78%) |              3100 (75%) |              3182 (77%) |
 | Nvidia GeForce GTX 1060M      |               4.44 |           6 |          192 |              983 (78%) |              1882 (75%) |              1803 (72%) |
 | Nvidia GeForce GTX 1050M Ti   |               2.49 |           4 |          112 |              631 (86%) |              1224 (84%) |              1115 (77%) |
 | Nvidia Quadro P1000           |               1.89 |           4 |           82 |              426 (79%) |               839 (79%) |               778 (73%) |
+| Nvidia GeForce GTX 970        |               4.17 |           4 |          224 |              980 (67%) |              1721 (59%) |              1623 (56%) |
 | Nvidia Quadro M4000           |               2.57 |           8 |          192 |              899 (72%) |              1519 (61%) |              1050 (42%) |
 | Nvidia Tesla M60 (1 GPU)      |               4.82 |           8 |          160 |              853 (82%) |              1571 (76%) |              1557 (75%) |
 | Nvidia GeForce GTX 960M       |               1.51 |           4 |           80 |              442 (84%) |               872 (84%) |               627 (60%) |
@@ -223,6 +360,7 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 | Intel HD Graphics 5500        |               0.35 |           3 |           26 |               75 (45%) |               192 (58%) |               108 (32%) |
 | Intel HD Graphics 4600        |               0.38 |           2 |           26 |              105 (63%) |               115 (35%) |                34 (10%) |
 | Samsung ARM Mali-G72 MP18     |               0.24 |           4 |           29 |               14 ( 7%) |                17 ( 5%) |                12 ( 3%) |
+| 2x AMD EPYC 9654              |              29.49 |        1536 |          922 |             1381 (23%) |              1814 (15%) |              1801 (15%) |
 | Intel Xeon Phi 7210           |               5.32 |         192 |          102 |              415 (62%) |               193 (15%) |               223 (17%) |
 | 4x Intel Xeon E5-4620 v4      |               2.69 |         512 |          273 |              460 (26%) |               275 ( 8%) |               239 ( 7%) |
 | 2x Intel Xeon E5-2630 v4      |               1.41 |          64 |          137 |              264 (30%) |               146 ( 8%) |               129 ( 7%) |
@@ -237,30 +375,62 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 
 
 
-## Maximum Grid Resolution for D3Q19 LBM
+## Multi-GPU Benchmarks
+
+Multi-GPU benchmarks are done at the largest possible grid resolution with a cubic domain, and either 2x1x1, 2x2x1 or 2x2x2 of these cubic domains together. The percentages in brackets are single-GPU roofline model efficiency, and the multiplicator numbers in brackets are scaling factors relative to benchmarked single-GPU performance.
+
+| Device                        | FP32<br>[TFlops/s] | Mem<br>[GB] | BW<br>[GB/s] | FP32/FP32<br>[MLUPs/s] | FP32/FP16S<br>[MLUPs/s] | FP32/FP16C<br>[MLUPs/s] |
+| :---------------------------- | -----------------: | ----------: | -----------: | ---------------------: | ----------------------: | ----------------------: |
+|                               |                    |             |              |                        |                         |                         |
+| 1x AMD Instinct MI250 (1 GCD) |              45.26 |          64 |         1638 |             5638 (53%) |              9030 (42%) |              8506 (40%) |
+| 1x AMD Instinct MI250 (2 GCD) |              90.52 |         128 |         3277 |            9460 (1.7x) |            14313 (1.6x) |            17338 (2.0x) |
+| 2x AMD Instinct MI250 (4 GCD) |             181.04 |         256 |         6554 |           16925 (3.0x) |            29163 (3.2x) |            29627 (3.5x) |
+| 4x AMD Instinct MI250 (8 GCD) |             362.08 |         512 |        13107 |           27350 (4.9x) |            52258 (5.8x) |            53521 (6.3x) |
+|                               |                    |             |              |                        |                         |                         |
+| 1x AMD Radeon VII             |              13.83 |          16 |         1024 |             4898 (73%) |              7778 (58%) |              5256 (40%) |
+| 2x AMD Radeon VII             |              27.66 |          32 |         2048 |            8113 (1.7x) |            15591 (2.0x) |            10352 (2.0x) |
+| 4x AMD Radeon VII             |              55.32 |          64 |         4096 |           12911 (2.6x) |            24273 (3.1x) |            17080 (3.2x) |
+|                               |                    |             |              |                        |                         |                         |
+| 1x Nvidia A100 SXM4 40GB      |              19.49 |          40 |         1555 |             8522 (84%) |             16013 (79%) |             11251 (56%) |
+| 2x Nvidia A100 SXM4 40GB      |              38.98 |          80 |         3110 |           13629 (1.6x) |            24620 (1.5x) |            18850 (1.7x) |
+| 4x Nvidia A100 SXM4 40GB      |              77.96 |         160 |         6220 |           17978 (2.1x) |            30604 (1.9x) |            30627 (2.7x) |
+|                               |                    |             |              |                        |                         |                         |
+| 1x Nvidia Tesla K40m          |               4.29 |          12 |          288 |             1131 (60%) |              1868 (50%) |               912 (24%) |
+| 2x Nvidia Tesla K40m          |               8.58 |          24 |          577 |            1971 (1.7x) |             3300 (1.8x) |             1801 (2.0x) |
+|                               |                    |             |              |                        |                         |                         |
+| 1x Nvidia Quadro RTX 8000 Pa. |              14.93 |          48 |          624 |             2591 (64%) |              5408 (67%) |              5607 (69%) |
+| 2x Nvidia Quadro RTX 8000 Pa. |              29.86 |          96 |         1248 |            4767 (1.8x) |             9607 (1.8x) |            10214 (1.8x) |
+|                               |                    |             |              |                        |                         |                         |
+| 1x Nvidia GeForce RTX 2080 Ti |              13.45 |          11 |          616 |             3194 (79%) |              6700 (84%) |              6853 (86%) |
+| 2x Nvidia GeForce RTX 2080 Ti |              26.90 |          22 |         1232 |            5085 (1.6x) |            10770 (1.6x) |            10922 (1.6x) |
+
+
+
+## Maximum Single-Domain Grid Resolution for D3Q19 LBM
 
 | Memory | FP32/FP32 | FP32/FP16 |
 | -----: | --------: | --------: |
-|   1 GB |      224³ |      264³ |
-|   2 GB |      280³ |      336³ |
-|   3 GB |      320³ |      384³ |
-|   4 GB |      352³ |      424³ |
-|   6 GB |      404³ |      484³ |
-|   8 GB |      448³ |      532³ |
-|  10 GB |      480³ |      572³ |
-|  11 GB |      496³ |      592³ |
-|  12 GB |      512³ |      608³ |
+|   1 GB |      224³ |      266³ |
+|   2 GB |      282³ |      336³ |
+|   3 GB |      322³ |      384³ |
+|   4 GB |      354³ |      424³ |
+|   6 GB |      406³ |      484³ |
+|   8 GB |      448³ |      534³ |
+|  10 GB |      482³ |      574³ |
+|  11 GB |      498³ |      594³ |
+|  12 GB |      512³ |      610³ |
 |  16 GB |      564³ |      672³ |
-|  24 GB |      644³ |      768³ |
-|  32 GB |      708³ |      848³ |
-|  40 GB |      764³ |      912³ |
-|  48 GB |      812³ |      968³ |
+|  20 GB |      608³ |      724³ |
+|  24 GB |      646³ |      770³ |
+|  32 GB |      710³ |      848³ |
+|  40 GB |      766³ |      912³ |
+|  48 GB |      814³ |      970³ |
 |  64 GB |      896³ |     1068³ |
-|  80 GB |      964³ |     1148³ |
-|  96 GB |     1024³ |     1220³ |
-| 128 GB |     1128³ |     1344³ |
+|  80 GB |      966³ |     1150³ |
+|  96 GB |     1026³ |     1222³ |
+| 128 GB |     1130³ |     1346³ |
 | 192 GB |     1292³ |     1540³ |
-| 256 GB |     1420³ |     1624³ |
+| 256 GB |     1422³ |     1624³ |
 | 384 GB |     1624³ |     1624³ |
 
 
@@ -273,7 +443,7 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 
 - <details><summary>FluidX3D only uses FP32 or even FP32/FP16, in contrast to FP64. Are simulation results physically accurate?</summary><br>Yes, in all but extreme edge cases. The code has been specially optimized to minimize arithmetic round-off errors and make the most out of lower precision. With these optimizations, accuracy in most cases is indistinguishable from FP64 double-precision, even with FP32/FP16 mixed-precision. Details can be found in <a href="https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats">this paper</a>.<br><br></details>
 
-- <details><summary>Why is the simulation box size limited to 2³² grid points?</summary><br>The 32-bit unsigned integer grid index will overflow above this number. Using 64-bit index calculation would slow the simulation down by ~20%, as 64-bit uint is calculated on special function units and not the regular GPU cores. 2³² grid points with FP32/FP16 mixed-precision is equivalent to 225GB memory and single GPUs currently are only at 80GB, so it should be fine for a while to come.<br><br></details>
+- <details><summary>Why is the domain size limited to 2³² grid points?</summary><br>The 32-bit unsigned integer grid index will overflow above this number. Using 64-bit index calculation would slow the simulation down by ~20%, as 64-bit uint is calculated on special function units and not the regular GPU cores. 2³² grid points with FP32/FP16 mixed-precision is equivalent to 225GB memory and single GPUs currently are only at 128GB, so it should be fine for a while to come. For higher resolutions above the single-domain limit, use multiple domains (typically 1 per GPU, but multiple domains on the same GPU also work).<br><br></details>
 
 - <details><summary>Comparted to the benchmark numbers stated <a href="https://www.researchgate.net/publication/362275548_Accuracy_and_performance_of_the_lattice_Boltzmann_method_with_64-bit_32-bit_and_customized_16-bit_number_formats">here</a>, efficiency seems much lower but performance is slightly better for most devices. How can this be?</summary><br>In that paper, the One-Step-Pull swap algorithm is implemented, using only misaligned reads and coalesced writes. On almost all GPUs, the performance penalty for misaligned writes is much larger than for misaligned reads, and sometimes there is almost no penalty for misaligned reads at all. Because of this, One-Step-Pull runs at peak bandwidth and thus peak efficiency.<br>Here, a different swap algorithm termed <a href="https://doi.org/10.3390/computation10060092">Esoteric-Pull</a> is used, a type of in-place streaming. This makes the LBM require much less memory (93 vs. 169 (FP32/FP32) or 55 vs. 93 (FP32/FP16) Bytes/node for D3Q19), and also less memory bandwidth (153 vs. 171 (FP32/FP32) or 77 vs. 95 (FP32/FP16) Bytes/node per time step for D3Q19) due to so-called implicit bounce-back boundaries. However memory access now is half coalesced and half misaligned for both reads and writes, so memory access efficiency is lower. For overall performance, these two effects approximately cancel out. The benefit of Esoteric-Pull - being able to simulate domains twice as large with the same amount of memory - clearly outweights the cost of slightly lower memory access efficiency, especially since performance is not reduced overall.<br><br></details>
 
@@ -281,9 +451,9 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 
 - <details><summary>Why no multi-relaxation-time (MRT) collision operator?</summary><br>The idea of MRT is to linearly transform the DDFs into "moment space" by matrix multiplication and relax these moments individually, promising better stability and accuracy. In practice, in the vast majority of cases, it has zero or even negative effects on stability and accuracy, and simple SRT is much superior. Apart from the kinematic shear viscosity and conserved terms, the remaining moments are non-physical quantities and their tuning is a blackbox. Although MRT can be implemented in an efficient manner with only a single matrix-vector multiplication in registers, leading to identical performance compared to SRT by remaining bandwidth-bound, storing the matrices vastly elongates and over-complicates the code for no real benefit.<br><br></details>
 
-- <details><summary>How about multi-GPU?</summary><br>Multi-GPU would allow for larger simulation domains, but is currently not yet supported in FluidX3D. It makes code development and maintaining much more effort and many extensions close to impossible, for example ray-tracing graphics. With the in-place streaming implementation and FP16 memory compression combined, FluidX3D already only requires 1/3 the memory of existing LBM GPU implementations, so large domain size is already possible on a single GPU. Nevertheless, I will look into multi-GPU support in the future, so stay tuned.<br><br></details>
-
 ### Hardware
+
+- <details><summary>Can FluidX3D run on multiple GPUs at the same time?</summary><br>Yes. The simulation grid is then split in domains, one for each GPU (domain decomposition method). The GPUs essentially pool their memory, enabling much larger grid resolution and higher performance. Rendering is parallelized across multiple GPUs as well; each GPU renders its own domain with a 3D offset, then rendered frames from all GPUs are overlayed with their z-buffers. Communication between domains is done over PCIe, so no SLI/Crossfire/NVLink/InfinityFabric is required. All GPUs must however be installed in the same node (PC/laptop/server). Even unholy combinations of Nvidia/AMD/Intel GPUs will work, although it is recommended to only use GPUs with similar memory capacity and bandwidth together. Using a fast gaming GPU and slow integrated GPU together would only decrease performance due to communication overhead.<br><br></details>
 
 - <details><summary>I'm on a budget and have only a cheap computer. Can I run FluidX3D on my toaster PC/laptop?</summary><br>Absolutely. Today even the most inexpensive hardware, like integrated GPUs or entry-level gaming GPUs, support OpenCL. You might be a bit more limited on memory capacity and grid resolution, but you should be good to go. I've tested FluidX3D on very old and inexpensive hardware and even on my Samsung S9+ smartphone, and it runs just fine, although admittedly a bit slower.<br><br></details>
 
@@ -295,7 +465,7 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 
 - <details><summary>I don't have a dedicated graphics card at all. Can I still run FluidX3D on my PC/laptop?</summary><br>Yes. FluidX3D also runs on all integrated GPUs since around 2012, and also on CPUs.<br><br></details>
 
-- <details><summary>I need more memory than my GPU can offer. Can I run FluidX3D on my CPU as well?</summary><br>Yes. You only need to install the <a href="https://www.intel.com/content/www/us/en/developer/articles/tool/opencl-drivers.html">OpenCL Runtime for Intel CPUs</a>.<br><br></details>
+- <details><summary>I need more memory than my GPU can offer. Can I run FluidX3D on my CPU as well?</summary><br>Yes. You only need to install the <a href="https://github.com/intel/llvm/releases/tag/2022-09">OpenCL Runtime for Intel CPUs</a>.<br><br></details>
 
 - <details><summary>In the benchmarks you list some very expensive hardware. How do you get access to that?</summary><br>I'm a scientist (PhD candidate in computational physics) and I use FluidX3D for my research, so I have access to BZHPC, SuperMUC-NG and JURECA-DC supercomputers.<br><br></details>
 
@@ -324,6 +494,8 @@ In consequence, the arithmetic intensity of this implementation is 2.13 (FP32/FP
 ## External Code/Libraries/Images used in FluidX3D
 
 - [OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers) for GPU parallelization ([Khronos Group](https://www.khronos.org/opencl/))
+- [Win32 API](https://learn.microsoft.com/en-us/windows/win32/api/winbase/) for interactive graphics in Windows ([Microsoft](https://www.microsoft.com/))
+- [X11/Xlib](https://www.x.org/releases/current/doc/libX11/libX11/libX11.html) for interactive graphics in Linux ([The Open Group](https://www.x.org/releases/current/doc/libX11/libX11/libX11.html))
 - [marching-cubes tables](http://paulbourke.net/geometry/polygonise/) for isosurface generation on GPU ([Paul Bourke](http://paulbourke.net/geometry/))
 - [`src/lodepng.cpp`](https://github.com/lvandeve/lodepng/blob/master/lodepng.cpp) and [`src/lodepng.hpp`](https://github.com/lvandeve/lodepng/blob/master/lodepng.h) for `.png` encoding and decoding ([Lode Vandevenne](https://lodev.org/))
 - [SimplexNoise](https://weber.itn.liu.se/~stegu/simplexnoise/SimplexNoise.java) class in [`src/utilities.hpp`](https://github.com/ProjectPhysX/FluidX3D/blob/master/src/utilities.hpp) for generating continuous noise in 2D/3D/4D space ([Stefan Gustavson](https://github.com/stegu))
