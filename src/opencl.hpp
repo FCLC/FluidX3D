@@ -24,6 +24,7 @@ struct Device_Info {
 	uint compute_units=0u; // compute units (CUs) can contain multiple cores depending on the microarchitecture
 	uint clock_frequency=0u; // in MHz
 	bool is_cpu=false, is_gpu=false;
+	bool intel_gpu_above_4gb_patch = false; // memory allocations greater than 4GB need to be specifically enabled on Intel GPUs
 	uint is_fp64_capable=0u, is_fp32_capable=0u, is_fp16_capable=0u, is_int64_capable=0u, is_int32_capable=0u, is_int16_capable=0u, is_int8_capable=0u;
 	uint cores=0u; // for CPUs, compute_units is the number of threads (twice the number of cores with hyperthreading)
 	float tflops=0.0f; // estimated device FP32 floating point performance in TeraFLOPs/s
@@ -63,6 +64,15 @@ struct Device_Info {
 		const float arm = (float)(contains(to_lower(vendor), "arm"))*(is_gpu?8.0f:1.0f); // ARM GPUs usually have 8 cores/CU, ARM CPUs have 1 core/CU
 		cores = to_uint((float)compute_units*(nvidia+amd+intel+apple+arm)); // for CPUs, compute_units is the number of threads (twice the number of cores with hyperthreading)
 		tflops = 1E-6f*(float)cores*(float)ipc*(float)clock_frequency; // estimated device floating point performance in TeraFLOPs/s
+		if(intel==8.0f) { // fix wrong global memory reporting for Intel Arc GPUs
+			if((contains(name, "A770")&&memory>=12602u&&memory<13416u)||(contains_any(name, {"A770", "A750", "A580"})&&memory>=6286u&&memory<6693u)||(contains(name, "A380")&&memory>=4705u&&memory<5010u)) { // 77.5%-82.5% reporting -> /0.8
+				memory = (uint)((cl_device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>()*5ull/4ull)/1048576ull); // fix wrong (80% on Windows) memory reporting on Intel Arc
+			}
+			if((contains_any(name, {"A770", "0x56a0"})&&memory>=15041u&&memory<15855u)||(contains_any(name, {"A770", "A750", "A580", "0x56a0", "0x56a1", "0x56a2"})&&memory>=7503u&&memory<7910u)||(contains_any(name, {"A380", "0x56a5"})&&memory>=5616u&&memory<5921u)) { // 92.5%-97.5% reporting -> /0.95
+				memory = (uint)((cl_device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>()*20ull/19ull)/1048576ull); // fix wrong (95% on Linux) memory reporting on Intel Arc
+			}
+		}
+		intel_gpu_above_4gb_patch = (intel==8.0f)&&(memory>4096); // enable memory allocations greater than 4GB for Intel GPUs with >4GB VRAM
 	}
 	inline Device_Info() {}; // default constructor
 };
@@ -88,8 +98,9 @@ inline vector<Device_Info> get_devices(const bool print_info=true) { // returns 
 	for(uint i=0u; i<(uint)cl_platforms.size(); i++) {
 		vector<cl::Device> cl_devices;
 		cl_platforms[i].getDevices(CL_DEVICE_TYPE_ALL, &cl_devices);
-		cl::Context cl_context(cl_devices);
+		//cl::Context cl_context(cl_devices); // same cl::Context for all devices (allocates extra VRAM on all other unused Nvidia GPUs)
 		for(uint j=0u; j<(uint)cl_devices.size(); j++) {
+			cl::Context cl_context(cl_devices[j]); // separate cl::Context for each device
 			devices.push_back(Device_Info(cl_devices[j], cl_context, id++));
 		}
 	}
@@ -161,11 +172,12 @@ public:
 		const string kernel_code = enable_device_capabilities()+"\n"+opencl_c_code;
 		cl_source.push_back({ kernel_code.c_str(), kernel_code.length() });
 		this->cl_program = cl::Program(info.cl_context, cl_source);
+		const string build_options = string("-cl-fast-relaxed-math")+(info.intel_gpu_above_4gb_patch ? " -cl-intel-greater-than-4GB-buffer-required" : "");
 #ifndef LOG
-		int error = cl_program.build({ info.cl_device }, "-cl-fast-relaxed-math -w"); // compile OpenCL C code, disable warnings
+		int error = cl_program.build({ info.cl_device }, (build_options+" -w").c_str()); // compile OpenCL C code, disable warnings
 		if(error) print_warning(cl_program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(info.cl_device)); // print build log
 #else // LOG, generate logfile for OpenCL code compilation
-		int error = cl_program.build({ info.cl_device }, "-cl-fast-relaxed-math"); // compile OpenCL C code
+		int error = cl_program.build({ info.cl_device }, build_options.c_str()); // compile OpenCL C code
 		const string log = cl_program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(info.cl_device);
 		write_file("bin/kernel.log", log); // save build log
 		if((uint)log.length()>2u) print_warning(log); // print build log
@@ -210,7 +222,7 @@ private:
 			device.info.memory_used += (uint)(capacity()/1048576ull); // track device memory usage
 			if(device.info.memory_used>device.info.memory) print_error("Device \""+device.info.name+"\" does not have enough memory. Allocating another "+to_string((uint)(capacity()/1048576ull))+" MB would use a total of "+to_string(device.info.memory_used)+" MB / "+to_string(device.info.memory)+" MB.");
 			int error = 0;
-			device_buffer = cl::Buffer(device.get_cl_context(), CL_MEM_READ_WRITE, capacity(), nullptr, &error);
+			device_buffer = cl::Buffer(device.get_cl_context(), CL_MEM_READ_WRITE|((int)device.info.intel_gpu_above_4gb_patch<<23), capacity(), nullptr, &error); // for Intel GPUs, set flag CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL = (1<<23)
 			if(error==-61) print_error("Memory size is too large at "+to_string((uint)(capacity()/1048576ull))+" MB. Device \""+device.info.name+"\" accepts a maximum buffer size of "+to_string(device.info.max_global_buffer)+" MB.");
 			else if(error) print_error("Device buffer allocation failed with error code "+to_string(error)+".");
 			device_buffer_exists = true;
